@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 '''
  Jackson Labs Firefly-II and ULN-2550 GPS logger
  that allows logging every N seconds,
@@ -6,19 +6,14 @@
  This is NOT an NMEA logger, it uses SCPI over serial port
  Michael Hirsch
  https://scivision.co
- GPL v3+ license
 
- tested in Python 2.7 and 3.4 with PySerial 2.7
+
+ tested in Python 2.7 and 3 with PySerial 2.7
 
  Note: Jackson Labs default baud rate is 115200
-
-REQUIRES PySerial, obtained via
- conda install pyserial
- or
- pip install pyserial
 '''
 from serial import Serial
-from os.path import expanduser,splitext
+from nmeautils import Path
 from time import sleep
 from signal import signal,SIGINT
 from datetime import datetime, date
@@ -26,20 +21,19 @@ from datetime import datetime, date
 def nmeapoll(sport,logfn,period,verbose):
 
     # create a Serial object to manipulate the serial port
-    hs = Serial(sport,baud=19200,timeout=1,bytesize=8,
-                       parity='N',stopbits=1,xonxoff=0,rtscts=0)
+    with Serial(sport,baud=19200,timeout=1,bytesize=8,
+                       parity='N',stopbits=1,xonxoff=0,rtscts=0) as S:
 
-    if not hs.isOpen():
-       print('opening port ' + hs.name)
-       hs.open()
+        S.open()
+        assert S.isOpen(),'could not open {}'.format(S.name)
 
-    #let's clear out any old junk
-    hs.flushInput()
-    hs.flushOutput()
+        #let's clear out any old junk
+        S.flushInput()
+        S.flushOutput()
 
-    hs.write("*IDN?\r\n")
-    txt=hs.readlines()[1].decode('utf-8')
-    print(txt)
+        S.write("*IDN?\r\n")
+        txt=S.readlines()[1].decode('utf-8')
+        print(txt)
 
     LastDay = date.today()
     print('starting read loop')
@@ -49,25 +43,27 @@ def nmeapoll(sport,logfn,period,verbose):
         Today = date.today()
         if (Today-LastDay).days > 0:
             LastDay = Today
-
-
         #get beginning of read time
         now=datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
-        # get jamming level
-        hs.write("GPS:JAM?\r\n")
-        jam=hs.readlines()[1].decode('utf-8') #[1].rstrip('\r\n')
-        # get number of visible sats per almanac
-        hs.write("GPS:SAT:VIS:COUN?\r\n")
-        nVis=hs.readlines()[1].decode('utf-8')
-        # get number of actually tracked satellites
-        hs.write("GPS:SAT:TRA:COUN?\r\n")
-        nTrk=hs.readlines()[1].decode('utf-8')
-        #time offset
-        hs.write("PTIME:TINT?\r\n")
-        tint=hs.readlines()[1].decode('utf-8')
-        #holdover duration
-        hs.write("SYNC:HOLD:DUR?\r\n")
-        hdur=hs.readlines()[1].decode('utf-8')
+
+        with Serial(sport,baud=19200,timeout=1,bytesize=8,
+                       parity='N',stopbits=1,xonxoff=0,rtscts=0) as S:
+
+            # get jamming level
+            S.write("GPS:JAM?\r\n")
+            jam = S.readlines()[1].decode('utf-8') #[1].rstrip('\r\n')
+            # get number of visible sats per almanac
+            S.write("GPS:SAT:VIS:COUN?\r\n")
+            nVis = S.readlines()[1].decode('utf-8')
+            # get number of actually tracked satellites
+            S.write("GPS:SAT:TRA:COUN?\r\n")
+            nTrk = S.readlines()[1].decode('utf-8')
+            #time offset
+            S.write("PTIME:TINT?\r\n")
+            tint = S.readlines()[1].decode('utf-8')
+            #holdover duration
+            S.write("SYNC:HOLD:DUR?\r\n")
+            hdur = S.readlines()[1].decode('utf-8')
 
     	  #write results to disk
         cln=[now,jam,nVis,nTrk,tint,hdur]
@@ -76,8 +72,8 @@ def nmeapoll(sport,logfn,period,verbose):
             print(cln)
 
         if logfn is not None:
-            logfn = expanduser(splitext(logfn)[0]) + '-' + LastDay.strftime('%Y-%m-%d') + '.txt'
-            with open(logfn,"a") as f:
+            logfn = Path(logfn + '-' + LastDay.strftime('%Y-%m-%d') + '.log').expanduser()
+            with logfn.open("a") as f:
                 f.write(cln)
 
         sleep(period)
@@ -90,7 +86,7 @@ def parsestat(statint):
 
 def signal_handler(signal, frame):
     print('\n Aborting program as per user request! \n')
-    exit(0)
+    raise SystemExit()
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
